@@ -1,0 +1,192 @@
+// Azure Sentinel Advanced Threat Hunting Queries
+// Author: Ajit Nayak
+// Version: 1.0.0
+// Description: Advanced hunting queries for detecting sophisticated attack patterns
+
+// =============================================
+// 1. Time-series Anomaly for Login Attempts
+// =============================================
+// Detects statistical anomalies in login attempt frequency using series decomposition
+let timeframe = 7d;
+SecurityEvent
+| where EventID == 4625
+| make series AttemptCount = count() default = 0 step 1h by bin(TimeGenerated, 1h)
+| extend 
+    Anomaly = series_decompose_anomalies(AttemptCount, 1.5, 'tfidf'),
+    IsAnomaly = toulong(Anomaly) & 1  // Extract anomaly flag
+| where IsAnomaly == 1
+| project
+    TimeGenerated,
+    AttemptCount = series_take_last(AttemptCount, 1),
+    Baseline = series_decompose_Attempycount(AttemptCount, 1.5, 'tfidf')[0],
+    Deviation = series_decompose_Attempycount(AttemptCount, 1.5, 'tfidf')[2]
+| order by TimeGenerated desc
+
+
+// =============================================
+// 2. Spray Attack Detection (Same Password, Multiple Accounts)
+// =============================================
+// Detects password spraying attacks where same password is used across multiple accounts
+// Note: This requires password field in logs (typically not available due to security)
+// Alternative: Detect multiple account failures from same IP with similar timing
+let timeframe = 1h;
+let thresholdAccountCount = 5;  // Minimum different accounts targeted
+SecurityEvent
+| where EventID == 4625
+| where TimeGenerated > ago(timeframe)
+| summarize 
+    AccountCount = dcount(TargetUserName),
+    AttemptCount = count(),
+    Accounts = makeset(TargetUserName, 20),
+    FirstAttempt = min(TimeGenerated),
+    LastAttempt = max(TimeGenerated)
+by IpAddress
+| where AccountCount >= thresholdAccountCount
+| project
+    TimeGenerated = bin(TimeGenerated, 1h),
+    SourceIP = IpAddress,
+    TargetAccountCount = AccountCount,
+    TotalAttempts = AttemptCount,
+    TargetedAccounts = Accounts,
+    DurationMinutes = datetime_diff('minute', FirstAttempt, LastAttempt)
+| order by TargetAccountCount desc
+
+
+// =============================================
+// 3. Off-hours Logon Attempts
+// =============================================
+// Detects logon attempts outside business hours (9AM-6PM) on weekdays
+let startHour = 9;   // 9 AM
+let endHour = 18;    // 6 PM
+let weekend = dynamic([0, 6]);  // Sunday=0, Saturday=6
+SecurityEvent
+| where EventID == 4625
+| let hour = hour(TimeGenerated);
+| let day = dayofweek(TimeGenerated);
+| where hour < startHour or hour >= endHour or day in (weekend)
+| project
+    TimeGenerated,
+    SourceIP = IpAddress,
+    TargetAccount = TargetUserName,
+    Hour = hour(TimeGenerated),
+    DayOfWeek = dayofweek(TimeGenerated),
+    LogonType = LogonTypeValue,
+    AuthenticationPackageName
+| order by TimeGenerated desc
+
+
+// =============================================
+// 4. New Source IP Never Seen Before
+// =============================================
+// Detects source IPs that have never been observed in the environment
+// Uses a 30-day lookback period to establish baseline
+let lookbackPeriod = 30d;
+let knownIPs = 
+    SecurityEvent
+    | where TimeGenerated > ago(lookbackPeriod)
+    | where EventID in (4624, 4625)  // Both success and failure
+    | summarize by IpAddress
+    | project KnownIP = IpAddress;
+SecurityEvent
+| where EventID == 4625
+| where TimeGenerated > ago(7d)  // Focus on recent week for alerting
+| where IpAddress !in (knownIPs)
+| project
+    TimeGenerated,
+    NewSourceIP = IpAddress,
+    TargetAccount = TargetUserName,
+    LogonType = LogonTypeValue,
+    AuthenticationPackageName,
+    Workstation = WorkstationName
+| join kind=leftouter (
+    // Get geolocation info if available
+    SecurityEvent
+    | where EventID == 4625
+    | where isnotnull(Country) and Country != 'Unknown'
+    | summarize by IpAddress, Country, City, Latitude, Longitude
+) on $left.NewSourceIP == $right.IpAddress
+| project
+    TimeGenerated,
+    SourceIP = NewSourceIP,
+    TargetAccount,
+    LogonType,
+    AuthenticationPackageName,
+    Workstation,
+    Country,
+    City,
+    Latitude,
+    Longitude
+| order by TimeGenerated desc
+
+
+// =============================================
+// 5. Credential Stuffing Pattern (Same Account, Multiple IPs)
+// =============================================
+// Detects credential stuffing where multiple IPs attempt to logon to same account
+let timeframe = 6h;
+let minIPCount = 10;  // Minimum different IPs targeting same account
+SecurityEvent
+| where EventID == 4625
+| where TimeGenerated > ago(timeframe)
+| summarize 
+    IPCount = dcount(IpAddress),
+    AttemptCount = count(),
+    SourceIPs = makeset(IpAddress, 20),
+    FirstAttempt = min(TimeGenerated),
+    LastAttempt = max(TimeGenerated)
+by TargetUserName
+| where IPCount >= minIPCount
+| project
+    TimeGenerated = bin(TimeGenerated, 1h),
+    TargetAccount = TargetUserName,
+    SourceIPCount = IPCount,
+    TotalAttempts = AttemptCount,
+    SourceIPList = SourceIPs,
+    DurationMinutes = datetime_diff('minute', FirstAttempt, LastAttempt)
+| order by SourceIPCount desc
+
+
+// =============================================
+// 6. Impossible Travel Detection
+// =============================================
+// Detects logons from geographically distant locations within impossible timeframe
+let maxTravelSpeedKmph = 1000;  // Maximum realistic travel speed (km/h)
+let timeWindow = 5m;            // Time window to consider for impossible travel
+SecurityEvent
+| where EventID == 4625
+| where isnotnull(Latitude) and isnotnull(Longitude)
+| sort by TargetUserName, TimeGenerated
+| serialize 
+    SessionID = row_number(),
+    PrevLat = prev(Latitude),
+    PrevLon = prev(Longitude),
+    PrevTime = prev(TimeGenerated),
+    PrevIP = prev(IpAddress)
+| where 
+    isnotnull(PrevLat) and isnotnull(PrevLon)
+    and TargetUserName == prev(TargetUserName)  // Same account
+    and IpAddress != prev(IpAddress)  // Different IP
+    and TimeGenerated - PrevTime <= timeWindow  // Within time window
+| extend 
+    DistanceKm = 
+        6371 * acos(
+            sin(lat(Pi()*PrevLat/180)) * sin(lat(Pi()*Latitude/180)) +
+            cos(lat(Pi()*PrevLat/180)) * cos(lat(Pi()*Latitude/180)) *
+            cos(lat(Pi()*PrevLon/180) - lat(Pi()*Longitude/180))
+        ),
+    TimeDiffHours = datetime_diff('hour', TimeGenerated, PrevTime),
+    SpeedKmph = DistanceKm / TimeDiffHours
+| where SpeedKmph > maxTravelSpeedKmph
+| project
+    TimeGenerated,
+    Account = TargetUserName,
+    FirstIP = PrevIP,
+    FirstLat = PrevLat,
+    FirstLon = PrevLon,
+    SecondIP = IpAddress,
+    SecondLat = Latitude,
+    SecondLon = Longitude,
+    DistanceKm = round(DistanceKm, 2),
+    TimeDiffMinutes = round(datetime_diff('minute', TimeGenerated, PrevTime), 2),
+    SpeedKmph = round(SpeedKmph, 2)
+| order by SpeedKmph desc

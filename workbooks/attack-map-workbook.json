@@ -1,0 +1,148 @@
+{
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/settings/workbook.json",
+  "version": "Notebook/1.0",
+  "name": "Azure Sentinel Honeypot Attack Map",
+  "description": "Global visualization of brute force attacks against Azure Sentinel honeypot",
+  "author": {
+    "name": "Ajit Nayak",
+    "role": "SOC Analyst"
+  },
+  "groups": [
+    {
+      "type": "Text",
+      "value": "# Azure Sentinel Honeypot Attack Map\n\nReal-time visualization of global brute force attacks targeting the RDP honeypot. This workbook shows geographic distribution of failed logon attempts, top attacking countries, and temporal trends.",
+      "name": "markdownText",
+      "isVisible": true
+    },
+    {
+      "type": "Parameters",
+      "name": "parameters",
+      "value": [
+        {
+          "name": "timeRange",
+          "type": "Dropdown",
+          "value": {
+            "type": "string",
+            "value": "24h"
+          },
+          "description": "Time range for data",
+          "items": [
+            { "value": "6h", "text": "Last 6 hours" },
+            { "value": "24h", "text": "Last 24 hours" },
+            { "value": "7d", "text": "Last 7 days" },
+            { "value": "30d", "text": "Last 30 days" }
+          ]
+        },
+        {
+          "name": "minAttempts",
+          "type": "TextBox",
+          "value": {
+            "type": "string",
+            "value": "5"
+          },
+          "description": "Minimum attempts to display on map",
+          "text": "5",
+          "isRequired": true
+        }
+      ]
+    },
+    {
+      "type": "Query",
+      "name": "attackMapQuery",
+      "value": {
+        "query": "let timeRange = todatetime('{{timeRange'}});\nSecurityEvent\n| where TimeGenerated >= ago(timeRange)\n| where EventID == 4625\n| where isnotnull(Country) and Country != 'Unknown'\n| summarize \n    AttemptCount = count(),\n    UniqueIPs = dcount(IpAddress),\n    MostRecent = max(TimeGenerated),\n    TopAccount = any(TargetUserName)\nby Country, City, Latitude, Longitude\n| where AttemptCount >= {{minAttempts}}\n| project\n    latitude = todouble(Latitude),\n    longitude = todouble(Longitude),\n    country = Country,\n    city = City,\n    attempts = AttemptCount,\n    uniqueIPs = UniqueIPs,\n    mostRecent = MostRecent,\n    topAccount = TopAccount\n| order by attempts desc",
+        "visualization": {
+          "type": "map",
+          "title": "Global Attack Distribution",
+          "mapType": "heatmap",
+          "height": "400px",
+          "latitudeField": "latitude",
+          "longitudeField": "longitude",
+          "sizeField": "attempts",
+          "colorField": "attempts",
+          "tooltipFields": [
+            { "name": "country", "title": "Country" },
+            { "name": "city", "title": "City" },
+            { "name": "attempts", "title": "Login Attempts" },
+            { "name": "uniqueIPs", "title": "Unique Source IPs" },
+            { "name": "topAccount", "title": "Most Targeted Account" },
+            { "name": "mostRecent", "title": "Last Attempt" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Query",
+      "name": "topAttackersChart",
+      "value": {
+        "query": "let timeRange = todatetime('{{timeRange'}});\nSecurityEvent\n| where TimeGenerated >= ago(timeRange)\n| where EventID == 4625\n| where isnotnull(Country) and Country != 'Unknown'\n| summarize \n    AttemptCount = count(),\n    UniqueIPs = dcount(IpAddress)\nby Country\n| top 10 by AttemptCount desc\n| project\n    Country,\n    Attempts = AttemptCount,\n    UniqueIPs",
+        "visualization": {
+          "type": "barchart",
+          "title": "Top 10 Attacking Countries",
+          "yAxisTitle": "Number of Attempts",
+          "xAxisTitle": "Country",
+          "series": [
+            {
+              "name": "Login Attempts",
+              "column": "Attempts",
+              "type": "column"
+            },
+            {
+              "name": "Unique Source IPs",
+              "column": "UniqueIPs",
+              "type": "column"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Query",
+      "name": "timelineChart",
+      "value": {
+        "query": "let timeRange = todatetime('{{timeRange'}});\nSecurityEvent\n| where TimeGenerated >= ago(timeRange)\n| where EventID == 4625\n| summarize \n    AttemptCount = count()\nby bin(TimeGenerated, 1h)\n| order by TimeGenerated\n| project\n    Timestamp = TimeGenerated,\n    Attempts = AttemptCount",
+        "visualization": {
+          "type": "linechart",
+          "title": "Attack Attempts Over Time (Hourly)",
+          "yAxisTitle": "Number of Attempts",
+          "xAxisTitle": "Time",
+          "series": [
+            {
+              "name": "Failed Logon Attempts",
+              "column": "Attempts",
+              "type": "line"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Query",
+      "name": "accountTargetsTable",
+      "value": {
+        "query": "let timeRange = todatetime('{{timeRange'}});\nSecurityEvent\n| where TimeGenerated >= ago(timeRange)\n| where EventID == 4625\n| summarize \n    AttemptCount = count(),\n    UniqueSourceIPs = dcount(IpAddress),\n    Countries = makeset(Country, 10)\nby TargetUserName\n| top 10 by AttemptCount desc\n| project\n    TargetAccount = TargetUserName,\n    Attempts = AttemptCount,\n    UniqueSourceIPs,\n    Countries = array_strjoin(Countries, \", \")",
+        "visualization": {
+          "type": "table",
+          "title": "Most Targeted Accounts",
+          "columns": [
+            { "name": "TargetAccount", "title": "Target Account" },
+            { "name": "Attempts", "title": "Login Attempts" },
+            { "name": "UniqueSourceIPs", "title": "Unique Source IPs" },
+            { "name": "Countries", "title": "Countries Observed From" }
+          ]
+        }
+      }
+    }
+  ],
+  "fallbackResourceIds": [],
+  "metadata": {
+    "version": "1.0.0",
+    "lastUpdated": "2026-09-19",
+    "tags": [
+      "honeypot",
+      "brute-force",
+      "geolocation",
+      "attack-map"
+    ]
+  }
+}

@@ -1,0 +1,150 @@
+// Azure Sentinel Brute Force Detection Rules
+// Author: Ajit Nayak
+// Version: 1.0.0
+// Description: Production KQL queries for detecting brute force attacks against RDP honeypot
+
+// =============================================
+// 1. Failed RDP Logon Detection (Event ID 4625)
+// =============================================
+// Detects all failed RDP logon attempts for baseline monitoring
+SecurityEvent
+| where EventID == 4625
+| where AccountType == 'User'  // Filter out machine accounts
+| where TargetUserName != '-'  // Exclude anonymous attempts
+| project 
+    TimeGenerated,
+    Computer,
+    SourceIP = IpAddress,
+    SourcePort = SourcePortNumber,
+    TargetAccount = TargetUserName,
+    TargetDomain = TargetDomainName,
+    LogonType = LogonTypeValue,
+    AuthenticationPackageName,
+    FailureReason = Status,
+    Workstation = WorkstationName,
+    ProcessName = NewProcessName,
+    IpAddress
+| order by TimeGenerated desc
+
+
+// =============================================
+// 2. Geographic Anomaly Detection
+// =============================================
+// Detects logons from unusual geographic locations based on historical patterns
+// Requires enrichment with geolocation data (Country, City, etc.)
+let lookbackPeriod = 7d;  // Establish baseline from last 7 days
+SecurityEvent
+| where EventID == 4625
+| where isnotnull(Country) and Country != 'Unknown'
+| summarize 
+    KnownCountries = makeset(Country, 100),
+    KnownCities = makeset(City, 100)
+by bin(TimeGenerated, 1d)
+| expand KnownCountries, KnownCities
+| join (
+    SecurityEvent
+    | where EventID == 4625
+    | where isnotnull(Country) and Country != 'Unknown'
+    | project 
+        TimeGenerated,
+        SourceIP = IpAddress,
+        Country,
+        City,
+        TargetAccount = TargetUserName
+) on $left.TimeGenerated >= $right.TimeGenerated - 1d and $left.TimeGenerated <= $right.TimeGenerated + 1d
+| where Country !in_ (KnownCountries) or City !in_ (KnownCities)
+| project
+    TimeGenerated,
+    SourceIP,
+    Country,
+    City,
+    TargetAccount,
+    AnomalyType = iif(Country !in_ (KnownCountries), 'New Country', 'New City')
+| order by TimeGenerated desc
+
+
+// =============================================
+// 3. Brute Force Threshold Alerting (>10 failures in 5 min from same IP)
+// =============================================
+// Detects aggressive brute force attacks with high frequency from single source
+SecurityEvent
+| where EventID == 4625
+| summarize 
+    FailureCount = count(),
+    TargetAccounts = makeset(TargetUserName, 20),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+by IpAddress, bin(TimeGenerated, 5m)
+| where FailureCount > 10
+| extend 
+    AttackDuration = datetime_diff('second', LastSeen, FirstSeen),
+    AttacksPerMinute = todouble(FailureCount) / 5
+| project
+    TimeGenerated = bin(TimeGenerated, 5m),
+    AttackingIP = IpAddress,
+    FailureCount,
+    TargetAccounts,
+    AttackDurationSeconds = AttackDuration,
+    AttacksPerMinute,
+    FirstSeen,
+    LastSeen
+| order by FailureCount desc
+
+
+// =============================================
+// 4. Top Attacking Countries Dashboard Query
+// =============================================
+// Provides aggregated view for attack map visualization
+SecurityEvent
+| where EventID == 4625
+| where isnotnull(Country) and Country != 'Unknown'
+| summarize 
+    AttackCount = count(),
+    UniqueSourceIPs = dcount(IpAddress),
+    MostTargetedAccount = arg_max(TargetUserName, _ItemSeq)  // Simplified - gets most frequent
+by Country, City, Latitude, Longitude
+| top 20 by AttackCount desc
+| project
+    Country,
+    City,
+    Latitude,
+    Longitude,
+    AttackCount,
+    UniqueSourceIPs,
+    MostTargetedAccount
+| order by AttackCount desc
+
+
+// =============================================
+// 5. Successful Logon After Brute Force Chain
+// =============================================
+// Detects successful logons (4624) preceded by brute force attempts from same IP
+let bruteForceThreshold = 5;  // Minimum failures to consider as attack
+let timeWindow = 15m;         // Lookback window for preceding failures
+SecurityEvent
+| where EventID in (4625, 4624)  // Both failed and successful logons
+| sort by IpAddress, TimeGenerated
+| serialize 
+    SessionId = row_number(),
+    PrevEventID = prev(EventID),
+    PrevTime = prev(TimeGenerated),
+    PrevIP = prev(IpAddress)
+| where 
+    EventID == 4624  // Successful logon
+    and PrevEventID == 4625  // Preceded by failure
+    and IpAddress == PrevIP  // Same source IP
+    and TimeGenerated - PrevTime <= timeWindow  // Within time window
+| join (
+    SecurityEvent
+    | where EventID == 4625
+    | summarize FailureCount = count() by IpAddress, bin(TimeGenerated, 5m)
+    | where FailureCount >= bruteForceThreshold
+) on $left.IpAddress == $right.IpAddress
+| project
+    SuccessfulLogonTime = TimeGenerated,
+    SourceIP = IpAddress,
+    TargetAccount = TargetUserName,
+    SourceWorkstation = WorkstationName,
+    PrecedingFailureCount = FailureCount,
+    TimeWindowMinutes = timeWindow
+| order by SuccessfulLogonTime desc
