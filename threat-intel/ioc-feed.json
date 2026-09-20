@@ -1,0 +1,74 @@
+{
+  "feedName": "AzureSentinelHoneypot-ThreatIntelFeed",
+  "description": "Sample Indicators of Compromise (IOCs) collected from honeypot telemetry and external threat feeds for automated correlation in Azure Sentinel.",
+  "version": "2.0.0",
+  "lastUpdated": "2026-03-30T00:00:00Z",
+  "indicators": [
+    {
+      "id": "ioc-ip-001",
+      "type": "ipv4-addr",
+      "value": "185.220.101.5",
+      "confidence": 100,
+      "severity": "High",
+      "threatType": "BruteForce",
+      "description": "Known Tor exit node / aggressive RDP scanner targeting Windows authentication endpoints.",
+      "firstSeen": "2026-01-15T08:30:00Z",
+      "tags": ["RDP", "BruteForce", "TorNode"]
+    },
+    {
+      "id": "ioc-ip-002",
+      "type": "ipv4-addr",
+      "value": "45.154.255.19",
+      "confidence": 95,
+      "severity": "Critical",
+      "threatType": "MalwareC2",
+      "description": "Associated with known ransomware staging infrastructure and credential harvesting.",
+      "firstSeen": "2026-02-01T12:15:00Z",
+      "tags": ["Ransomware", "C2", "CredentialHarvesting"]
+    },
+    {
+      "id": "ioc-ip-003",
+      "type": "ipv4-addr",
+      "value": "193.32.162.21",
+      "confidence": 90,
+      "severity": "High",
+      "threatType": "Scanner",
+      "description": "Automated vulnerability scanner probing for vulnerable Remote Desktop Gateway services.",
+      "firstSeen": "2026-02-10T19:45:00Z",
+      "tags": ["Scanner", "RDP", "PortScan"]
+    },
+    {
+      "id": "ioc-ip-004",
+      "type": "ipv4-addr",
+      "value": "91.240.118.29",
+      "confidence": 98,
+      "severity": "Critical",
+      "threatType": "APT",
+      "description": "IP range flagged in state-sponsored credential stuffing campaigns.",
+      "firstSeen": "2026-03-01T04:20:00Z",
+      "tags": ["APT", "CredentialStuffing", "BruteForce"]
+    },
+    {
+      "id": "ioc-domain-001",
+      "type": "domain-name",
+      "value": "update-windows-service.ddns.net",
+      "confidence": 95,
+      "severity": "High",
+      "threatType": "MaliciousDomain",
+      "description": "Dynamic DNS domain used for command and control callback after successful initial access.",
+      "firstSeen": "2026-02-15T10:00:00Z",
+      "tags": ["C2", "DynamicDNS", "PayloadDelivery"]
+    },
+    {
+      "id": "ioc-domain-002",
+      "type": "domain-name",
+      "value": "microsoft-security-alert-portal.com",
+      "confidence": 99,
+      "severity": "Critical",
+      "threatType": "Phishing",
+      "description": "Typosquatting domain used in spear-phishing and post-compromise reconnaissance.",
+      "firstSeen": "2026-03-05T14:10:00Z",
+      "tags": ["Phishing", "Typosquatting", "SocialEngineering"]
+    }
+  ]
+}
