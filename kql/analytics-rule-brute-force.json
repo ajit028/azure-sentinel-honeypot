@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/savedSearches",
+      "apiVersion": "2020-08-01",
+      "name": "[parameters('workspace'), 'RDP-Brute-Force-High-Velocity']",
+      "properties": {
+        "etag": "*",
+        "displayName": "High-Velocity RDP Brute-Force Attack Detection",
+        "category": "Security",
+        "query": "SecurityEvent\n| where TimeGenerated > ago(1h)\n| where EventID == 4625\n| summarize FailedAttempts=count(), TargetAccounts=make_set(TargetUserName), SourceIPs=make_set(IpAddress) by SourceIp = IpAddress, bin(TimeGenerated, 5m)\n| where FailedAttempts > 10\n| sort by FailedAttempts desc",
+        "version": 1
+      }
+    }
+  ],
+  "parameters": {
+    "workspace": {
+      "type": "string",
+      "metadata": {
+        "description": "Azure Sentinel Log Analytics Workspace Name"
+      }
+    }
+  }
+}

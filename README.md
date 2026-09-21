@@ -53,8 +53,9 @@ graph TD
 1. **Exposes a Controlled Honeypot**: Deploys an Azure Windows VM with an open Network Security Group (NSG) on port 3389 (RDP) and 445 (SMB) to naturally attract brute-force attempts, credential stuffing, and unauthorized reconnaissance scans from global threat actors.
 2. **Automated Log Extraction & Geo-Enrichment**: Executes a robust PowerShell automation pipeline (`ingest-geo.ps1`) that parses local Windows Security Event logs (Event ID 4625), queries multi-source IP geolocation intelligence APIs with automatic failover and rate-limiting, and structures the output into enriched CSV and JSON payloads.
 3. **Enterprise Infrastructure as Code (Terraform)**: Provides a modular Terraform configuration (`terraform/main.tf`) for rapid, repeatable, and production-ready provisioning of the entire Azure resource stack.
-4. **Automated CI/CD & Unit Testing**: Features a comprehensive GitHub Actions CI pipeline (`workflows/ci-pipeline.yml`) that validates KQL syntax, lints Terraform/ARM templates, and runs pytest test suites (`tests/test_ingest.py`) verifying parser logic and API mocking.
-5. **Threat Intelligence Correlation**: Integrates a curated IOC threat feed (`threat-intel/ioc-feed.json`) containing known malicious IPs, Tor exit nodes, and C2 domains for automated correlation in Microsoft Sentinel.
+4. **Advanced Threat Hunting & Playbooks**: Includes a compliant SANS/NIST Incident Response playbook (`playbooks/incident-response-playbook.md`) targeting RDP brute-force and credential access incidents for structured SOC Analyst operations.
+5. **Automated CI/CD & Unit Testing**: Features a comprehensive GitHub Actions CI pipeline (`workflows/ci-pipeline.yml`) that validates KQL syntax using a custom script (`scripts/kql_validator.py`), lints Terraform/ARM templates, and runs pytest test suites (`tests/test_ingest.py`) verifying parser logic and API mocking.
+6. **Threat Intelligence Correlation & Deployment**: Integrates a curated IOC threat feed (`threat-intel/ioc-feed.json`) and API/ARM-ready Sentinel analytics templates (`kql/analytics-rule-brute-force.json`) for automated correlation and rapid SOC ingestion.
 
 ---
 
