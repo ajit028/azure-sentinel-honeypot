@@ -1,0 +1,2 @@
+// Additional KQL Threat Hunting Query
+SecurityEvent | where EventID == 4624 | where LogonType == 10 | summarize count() by TargetUserName, IpAddress
